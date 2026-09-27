@@ -89,5 +89,5 @@ if (!window.comercianteSession) {
     });
     updateMerchantPresence();
     window.setInterval(() => updateMerchantPresence(), 15000);
-    window.addEventListener("pagehide", () => updateMerchantPresence("offline"));
+    
 }

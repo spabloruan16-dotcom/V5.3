@@ -25,6 +25,8 @@ const newCategoryInput = document.getElementById("newCategoryInput");
 const addCategoryButton = document.getElementById("addCategoryButton");
 const categoriesKey = "modaCenterCategories";
 const merchantId = String(window.comercianteSession?.id || "");
+let productSubmitInFlight = false;
+let activeClientRequestId = null;
 
 function getCategories() {
 	const saved = JSON.parse(localStorage.getItem(categoriesKey) || "{}");
@@ -159,6 +161,11 @@ productForm.addEventListener("submit", event => {
 
 async function saveProduct(event) {
 	event.preventDefault();
+	if (productSubmitInFlight) return;
+	productSubmitInFlight = true;
+	const submitButton = productForm.querySelector('button[type="submit"]');
+	if (submitButton) { submitButton.disabled = true; submitButton.dataset.originalText = submitButton.textContent; submitButton.textContent = "Salvando..."; }
+	activeClientRequestId ||= `${merchantId}-${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`;
 
 	const data = new FormData(productForm);
 	const name = String(data.get("name") || "").trim();
@@ -173,20 +180,24 @@ async function saveProduct(event) {
 	if (!category) {
 		categoryNote.textContent = "Escolha o tipo de produto.";
 		categoryGrid.scrollIntoView({ behavior: "smooth", block: "center" });
+		productSubmitInFlight = false; if (submitButton) { submitButton.disabled = false; submitButton.textContent = submitButton.dataset.originalText || "Cadastrar produto"; }
 		return;
 	}
 
 	if (!name || !price || price <= 0) {
 		formNote.textContent = "Preencha o nome e um preço válido para o produto.";
+		productSubmitInFlight = false; if (submitButton) { submitButton.disabled = false; submitButton.textContent = submitButton.dataset.originalText || "Cadastrar produto"; }
 		return;
 	}
 
 	if (variations.some(variation => !variation.color || !variation.size)) {
 		formNote.textContent = "Preencha a cor e o tamanho de todas as variações.";
+		productSubmitInFlight = false; if (submitButton) { submitButton.disabled = false; submitButton.textContent = submitButton.dataset.originalText || "Cadastrar produto"; }
 		return;
 	}
 	if (variations.some((variation, index) => variations.some((other, otherIndex) => index !== otherIndex && variation.color.toLowerCase() === other.color.toLowerCase() && variation.size.toLowerCase() === other.size.toLowerCase()))) {
 		formNote.textContent = "Não repita a mesma combinação de cor e tamanho.";
+		productSubmitInFlight = false; if (submitButton) { submitButton.disabled = false; submitButton.textContent = submitButton.dataset.originalText || "Cadastrar produto"; }
 		return;
 	}
 
@@ -194,7 +205,7 @@ async function saveProduct(event) {
 	// usuário, indexada pelo id da sessão — igual ao padrão já
 	// usado em "modaCenterStores").
 	const product = {
-		id: Date.now(),
+		id: activeClientRequestId,
 		ownerId: window.comercianteSession.id,
 		name: name,
 		description: String(data.get("description") || "").trim(),
@@ -211,10 +222,11 @@ async function saveProduct(event) {
 
 	if (window.location.protocol !== "file:") {
 		try {
-			const response = await fetch("/api/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(product) });
+			const response = await fetch("/api/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...product, clientRequestId: activeClientRequestId }) });
 			if (!response.ok) throw new Error("Servidor indisponível");
 		} catch (error) {
 			formNote.textContent = "Não foi possível salvar no servidor. Tente novamente.";
+			productSubmitInFlight = false; if (submitButton) { submitButton.disabled = false; submitButton.textContent = submitButton.dataset.originalText || "Cadastrar produto"; }
 			return;
 		}
 	}

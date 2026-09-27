@@ -52,6 +52,7 @@ const saveMirrorPhotoButton = document.getElementById("saveMirrorPhoto");
 const stores = JSON.parse(localStorage.getItem(STORES_KEY) || "{}");
 let catalogProducts = [];
 let catalogStores = stores;
+let serverCoupons = [];
 const deliveredPurchases = new Set();
 
 function updateClientPresence(status = "online") {
@@ -73,7 +74,7 @@ document.getElementById("clientLogout").addEventListener("click", () => {
 
 updateClientPresence();
 window.setInterval(() => updateClientPresence(), 15000);
-window.addEventListener("pagehide", () => updateClientPresence("offline"));
+
 
 function escapeHtml(value) {
     return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
@@ -321,6 +322,7 @@ async function loadCatalog() {
         const data = await response.json();
         catalogProducts = Array.isArray(data.products) ? data.products : [];
         catalogStores = data.stores || {};
+        serverCoupons = Array.isArray(data.coupons) ? data.coupons : serverCoupons;
         const ordersResponse = await fetch(`/api/orders?clientId=${encodeURIComponent(session.id)}`, { cache: "no-store" });
         if (ordersResponse.ok) {
             const ordersData = await ordersResponse.json();
@@ -533,13 +535,19 @@ function findCoupon(code) {
     for (const item of getCart()) {
         const product = products.find(entry => String(entry.id) === String(item.productId));
         if (!product) continue;
-        const coupon = readMerchantCampaigns(product.ownerId).find(campaign =>
-            String(campaign.code || "").trim() === exactCode &&
-            (campaign.type === "coupon" || campaign.type === "cupons")
-        );
+        const candidates = [...serverCoupons, ...readMerchantCampaigns(product.ownerId)];
+        const coupon = candidates.find(campaign => String(campaign.ownerId) === String(product.ownerId) && String(campaign.code || "").trim().toLowerCase() === exactCode.toLowerCase() && (campaign.type === "coupon" || campaign.type === "cupons"));
         if (coupon) return { ...coupon, ownerId: product.ownerId };
     }
     return null;
+}
+
+async function syncCoupons() {
+    if (!API_ENABLED) return;
+    try {
+        const response = await fetch("/api/coupons", { cache: "no-store" });
+        if (response.ok) { const data = await response.json(); serverCoupons = Array.isArray(data.coupons) ? data.coupons : []; renderCart(); }
+    } catch (_) {}
 }
 function getCouponsDiscount(coupons = getClientCoupons(), cart = getCart()) {
     const products = readProducts();
@@ -569,10 +577,11 @@ function clearCoupon() {
     if (removeCouponButton) removeCouponButton.hidden = true;
     renderCart();
 }
-function applyCoupon() {
+async function applyCoupon() {
     const code = couponInput?.value.trim();
     if (!code) { if (couponNote) couponNote.textContent = "Digite um código de cupom."; return; }
-    const coupon = findCoupon(code);
+    let coupon = findCoupon(code);
+    if (!coupon && API_ENABLED) { await syncCoupons(); coupon = findCoupon(code); }
     if (!coupon) { couponNote.textContent = "Cupom inválido ou não disponível para este carrinho."; return; }
     const coupons = getClientCoupons();
     if (coupons.some(item => String(item.code || "").trim() === code)) { couponNote.textContent = "Este cupom já foi aplicado."; return; }
@@ -690,8 +699,8 @@ async function confirmCheckout() {
     let completedOrder;
     if (API_ENABLED) {
         const response = await fetch("/api/orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: session.id, clientName: session.name || "Cliente", fulfillment, deliveryAddress: fulfillment === "delivery" ? address : null, pickupLocations: fulfillment === "pickup" ? getCartStores() : [], coupons: coupons.map(coupon => ({ code: coupon.code, campaignId: coupon.id, discount: Number(coupon.discount || 0) })), items: cart.map(entry => ({ productId: entry.productId, variationId: entry.variationId || null, quantity: entry.quantity })) }) });
-        if (!response.ok) { checkoutNote.textContent = "Não foi possível finalizar o pedido. Verifique o estoque."; checkoutButton.disabled = false; document.getElementById("confirmCheckout").disabled = false; renderCart(); return; }
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) { checkoutNote.textContent = data.error || data.mensagem || "Não foi possível finalizar o pedido."; checkoutButton.disabled = false; document.getElementById("confirmCheckout").disabled = false; renderCart(); return; }
         completedOrder = data.order;
         catalogProducts = data.products || catalogProducts;
     } else {
@@ -882,4 +891,6 @@ productDetailsModal.addEventListener("click", event => { if (event.target === pr
 render();
 renderCart();
 loadCatalog();
+syncCoupons();
 if (API_ENABLED) window.setInterval(loadCatalog, 5000);
+if (API_ENABLED) window.setInterval(syncCoupons, 10000);

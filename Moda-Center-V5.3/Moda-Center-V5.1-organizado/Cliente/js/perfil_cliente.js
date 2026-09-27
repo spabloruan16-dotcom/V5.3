@@ -16,7 +16,7 @@ function updatePresence(status = "online") {
 
 updatePresence();
 window.setInterval(() => updatePresence(), 15000);
-window.addEventListener("pagehide", () => updatePresence("offline"));
+
 
 const profileAvatar = document.getElementById("profileAvatar");
 const profileName = document.getElementById("profileName");

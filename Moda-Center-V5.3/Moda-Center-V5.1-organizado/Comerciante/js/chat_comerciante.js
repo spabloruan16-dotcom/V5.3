@@ -244,6 +244,9 @@ function openConversation(chatId) {
     chat.unreadCounts = chat.unreadCounts || {};
     chat.unreadCounts[String(currentUser.id)] = 0;
     saveChats(chats);
+    if (API_ENABLED) {
+        fetch(`/api/chats/${encodeURIComponent(chat.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "read", actorId: currentUser.id }) }).catch(() => {});
+    }
     conversationName.textContent = getOtherName(chat);
     conversationAvatar.textContent = getOtherAvatar(chat);
     conversationStatus.textContent = getOtherStatus(chat) === "online" ? "Online" : "Offline";
@@ -365,7 +368,7 @@ if (isMerchant) {
     setInterval(refreshClientNavigation, 3000);
 }
 updatePresence();
-window.addEventListener("pagehide", () => updatePresence("offline"));
+
 window.addEventListener("storage", event => {
     if (event.key !== CHAT_DATABASE_KEY && event.key !== PRESENCE_KEY) return;
     renderConversations(chatSearch.value);

@@ -19,10 +19,10 @@ function readDatabase() {
         // Remove o produto de demonstração legado das versões anteriores.
         return !(String(product?.id || "") === "p1" && String(product?.ownerId || "") === "test-merchant");
     });
-    return { products, stores: database.stores || {}, orders: Array.isArray(database.orders) ? database.orders : [], chats: Array.isArray(database.chats) ? database.chats : [], presence: database.presence || {}, users: Array.isArray(database.users) ? database.users : [] ,loyaltyCards: Array.isArray(database.loyaltyCards) ? database.loyaltyCards : [], loyaltyPoints: Array.isArray(database.loyaltyPoints) ? database.loyaltyPoints : [], loyaltyRedemptions: Array.isArray(database.loyaltyRedemptions) ? database.loyaltyRedemptions : []};
+    return { products, stores: database.stores || {}, orders: Array.isArray(database.orders) ? database.orders : [], chats: Array.isArray(database.chats) ? database.chats : [], presence: database.presence || {}, users: Array.isArray(database.users) ? database.users : [], coupons: Array.isArray(database.coupons) ? database.coupons : [], loyaltyCards: Array.isArray(database.loyaltyCards) ? database.loyaltyCards : [], loyaltyPoints: Array.isArray(database.loyaltyPoints) ? database.loyaltyPoints : [], loyaltyRedemptions: Array.isArray(database.loyaltyRedemptions) ? database.loyaltyRedemptions : []};
     } catch (error) {
     }
-    return { products: [], stores: {}, orders: [], chats: [], presence: {}, users: [] , loyaltyCards: [], loyaltyPoints: [], loyaltyRedemptions: []};
+    return { products: [], stores: {}, orders: [], chats: [], presence: {}, users: [], coupons: [], loyaltyCards: [], loyaltyPoints: [], loyaltyRedemptions: []};
 }
 
 function writeDatabase(database) {
@@ -147,14 +147,49 @@ function normalizeProduct(input) {
     const variations = Array.isArray(input.variations) ? input.variations.map(variation => ({ id: String(variation.id || crypto.randomUUID()), color: String(variation.color || "").trim(), size: String(variation.size || "").trim(), quantity: Math.max(0, Number(variation.quantity || 0)) })).filter(variation => variation.color && variation.size) : [];
     const quantity = variations.length ? variations.reduce((total, variation) => total + variation.quantity, 0) : Math.max(0, Number(input.quantity || 0));
    // ----------(incio) modificado por Marcos Persistência e normalização do estado de destaque do produto---------
-    return { id: String(input.id || crypto.randomUUID()), ownerId: String(input.ownerId), ownerName: String(input.ownerName || "Loja Moda Center"), name, description: String(input.description || ""), price, category: String(input.category || "Produto"), segments: Array.isArray(input.segments) ? input.segments : [], image: input.image || null, quantity, variations, discount: Math.min(100, Math.max(0, Number(input.discount || 0))), wholesale, salesCount: Math.max(0, Number(input.salesCount || 0)), ratings: Array.isArray(input.ratings) ? input.ratings : [], highlighted: Boolean(input.highlighted), published: input.published !== false, campaignId: input.campaignId || null, flashOffer: input.flashOffer || null, createdAt: input.createdAt || Date.now() };
+    return { id: String(input.id || crypto.randomUUID()), clientRequestId: input.clientRequestId ? String(input.clientRequestId) : null, ownerId: String(input.ownerId), ownerName: String(input.ownerName || "Loja Moda Center"), name, description: String(input.description || ""), price, category: String(input.category || "Produto"), segments: Array.isArray(input.segments) ? input.segments : [], image: input.image || null, quantity, variations, discount: Math.min(100, Math.max(0, Number(input.discount || 0))), wholesale, salesCount: Math.max(0, Number(input.salesCount || 0)), ratings: Array.isArray(input.ratings) ? input.ratings : [], highlighted: Boolean(input.highlighted), published: input.published !== false, campaignId: input.campaignId || null, flashOffer: input.flashOffer || null, createdAt: input.createdAt || Date.now() };
 // ----------(final) modificado por Marcos Persistência e normalização do estado de destaque do produto---------}
 }
 
 async function handleApi(request, response, url) {
     const database = readDatabase();
     if (request.method === "GET" && url.pathname === "/api/health") return sendJson(response, 200, { ok: true, timestamp: new Date().toISOString() });
-    if (request.method === "GET" && url.pathname === "/api/catalog") return sendJson(response, 200, { products: database.products, stores: database.stores });
+    if (request.method === "GET" && url.pathname === "/api/catalog") return sendJson(response, 200, { products: database.products, stores: database.stores, coupons: database.coupons });
+
+    if (request.method === "GET" && url.pathname === "/api/coupons") {
+        const ownerId = String(url.searchParams.get("ownerId") || "");
+        const coupons = database.coupons.filter(coupon => !ownerId || String(coupon.ownerId) === ownerId);
+        return sendJson(response, 200, { coupons });
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/coupons") {
+        const input = await readBody(request);
+        const ownerId = String(input.ownerId || "");
+        const code = String(input.code || "").trim();
+        if (!ownerId || !code) return sendJson(response, 400, { error: "ownerId e código do cupom são obrigatórios" });
+        database.coupons = Array.isArray(database.coupons) ? database.coupons : [];
+        const duplicate = database.coupons.find(c => String(c.ownerId) === ownerId && String(c.code || "").toLowerCase() === code.toLowerCase() && String(c.id) !== String(input.id || ""));
+        if (duplicate) return sendJson(response, 409, { error: "Esse código de cupom já está sendo usado" });
+        const coupon = {
+            id: String(input.id || crypto.randomUUID()), type: "coupon", name: String(input.name || "Cupom"), code,
+            discount: Math.min(100, Math.max(0, Number(input.discount || 0))), scope: input.scope === "category" || input.scope === "product" ? input.scope : "all",
+            category: String(input.category || ""), productId: input.productId ? String(input.productId) : "", productName: String(input.productName || ""),
+            start: input.start || "", end: input.end || "", limit: input.limit == null || input.limit === "" ? null : Math.max(1, Number(input.limit)),
+            used: Math.max(0, Number(input.used || 0)), active: input.active !== false, ownerId
+        };
+        database.coupons = database.coupons.filter(c => !(String(c.id) === coupon.id && String(c.ownerId) === ownerId));
+        database.coupons.push(coupon); writeDatabase(database);
+        return sendJson(response, 201, { coupon });
+    }
+
+    const couponDeleteMatch = url.pathname.match(/^\/api\/coupons\/([^/]+)$/);
+    if (request.method === "DELETE" && couponDeleteMatch) {
+        const input = await readBody(request); const id = decodeURIComponent(couponDeleteMatch[1]);
+        const before = database.coupons.length;
+        database.coupons = database.coupons.filter(c => !(String(c.id) === id && String(c.ownerId) === String(input.ownerId || "")));
+        if (database.coupons.length === before) return sendJson(response, 404, { error: "Cupom não encontrado" });
+        writeDatabase(database); return sendJson(response, 200, { ok: true });
+    }
 
     // A V5.2 usa MySQL somente para autenticacao e preserva o banco JSON
     // existente para catalogo, lojas, pedidos, chats e presenca.
@@ -625,8 +660,12 @@ if (request.method === "POST" && url.pathname === "/api/loyalty-redeem") {
         if (String(input.actorId) !== String(chat.clientId) && String(input.actorId) !== String(chat.merchantId)) return sendJson(response, 403, { error: "Usuario nao participa desta conversa" });
         if (request.method === "DELETE") database.chats.splice(chatIndex, 1);
         else {
-            if (input.action !== "pin") return sendJson(response, 400, { error: "Acao invalida" });
-            chat.pinned = Boolean(input.pinned);
+            if (input.action === "pin") chat.pinned = Boolean(input.pinned);
+            else if (input.action === "read") {
+                chat.unreadCounts = chat.unreadCounts || {};
+                chat.unreadCounts[String(input.actorId)] = 0;
+                if (String(chat.unreadFor || "") === String(input.actorId)) chat.unreadFor = null;
+            } else return sendJson(response, 400, { error: "Acao invalida" });
         }
         writeDatabase(database);
         return sendJson(response, 200, { ok: true });
@@ -687,7 +726,10 @@ if (request.method === "POST" && url.pathname === "/api/loyalty-redeem") {
         if (!input.ownerId) return sendJson(response, 400, { error: "ownerId obrigatorio" });
         const product = normalizeProduct(input);
         if (!product) return sendJson(response, 400, { error: "Produto invalido" });
-        const existingIndex = database.products.findIndex(item => String(item.id) === product.id && String(item.ownerId) === product.ownerId);
+        const existingIndex = database.products.findIndex(item =>
+            (String(item.id) === product.id || (product.clientRequestId && String(item.clientRequestId) === product.clientRequestId)) &&
+            String(item.ownerId) === product.ownerId
+        );
         if (existingIndex >= 0) database.products[existingIndex] = { ...database.products[existingIndex], ...product };
         else database.products.push(product);
         writeDatabase(database);
@@ -731,6 +773,25 @@ if (request.method === "POST" && url.pathname === "/api/loyalty-redeem") {
             return { productId: product.id, variationId: variation?.id || null, variation: variation ? { color: variation.color, size: variation.size } : null, ownerId: product.ownerId, ownerName: product.ownerName, name: product.name, price: product.price, quantity };
         });
         if (items.some(item => !item)) return sendJson(response, 409, { error: "Estoque insuficiente para um dos produtos" });
+        const redemptionId = String(input.redemptionId || "");
+        let descontoCupom = 0;
+        const cuponsUsados = [];
+        database.coupons = Array.isArray(database.coupons) ? database.coupons : [];
+        for (const requestedCoupon of (Array.isArray(input.coupons) ? input.coupons : [])) {
+            const code = String(requestedCoupon.code || "").trim();
+            if (!code) continue;
+            const couponCandidates = database.coupons.filter(c => String(c.code || "").toLowerCase() === code.toLowerCase() && c.active !== false);
+            const coupon = couponCandidates.find(c => items.some(item => String(item.ownerId) === String(c.ownerId)));
+            if (!coupon) return sendJson(response, 400, { error: `Cupom ${code} inválido ou indisponível para este carrinho` });
+            if (coupon.start && new Date(coupon.start) > new Date()) return sendJson(response, 400, { error: `Cupom ${code} ainda não está válido` });
+            if (coupon.end && new Date(coupon.end) < new Date()) return sendJson(response, 400, { error: `Cupom ${code} expirado` });
+            if (coupon.limit && Number(coupon.used || 0) >= Number(coupon.limit)) return sendJson(response, 400, { error: `Cupom ${code} atingiu o limite de usos` });
+            const eligible = items.filter(item => String(item.ownerId) === String(coupon.ownerId) && (coupon.scope === "all" || (coupon.scope === "category" && items.some(x => String(x.productId) === String(item.productId)) && String(database.products.find(p => String(p.id) === String(item.productId))?.category || "") === String(coupon.category || "")) || (coupon.scope === "product" && String(item.productId) === String(coupon.productId))));
+            if (!eligible.length) return sendJson(response, 400, { error: `Cupom ${code} não se aplica aos produtos do carrinho` });
+            const base = eligible.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0);
+            descontoCupom += base * Math.min(100, Math.max(0, Number(coupon.discount || 0))) / 100;
+            cuponsUsados.push(coupon);
+        }
         let descontoFidelidade = 0;
         let resgateUsado = null;
         if (redemptionId) {
@@ -767,9 +828,10 @@ if (request.method === "POST" && url.pathname === "/api/loyalty-redeem") {
         const pickupLocations = fulfillment === "pickup" && Array.isArray(input.pickupLocations) ? input.pickupLocations : [];
         if (fulfillment === "pickup" && pickupLocations.some(location => !location?.location?.sector || !location.location.street || !location.location.box)) return sendJson(response, 400, { error: "Localizacao para retirada indisponivel" });
         const subtotal = items.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
-        const total = Math.max(0, subtotal - descontoFidelidade);
-        const order = { id: crypto.randomUUID(), clientId, clientName, fulfillment, deliveryAddress, pickupLocations, items, subtotal, descontoFidelidade, total, redemptionId: redemptionId || null, status: "recebido", createdAt: Date.now(), updatedAt: Date.now() };
+        const total = Math.max(0, subtotal - descontoFidelidade - descontoCupom);
+        const order = { id: crypto.randomUUID(), clientId, clientName, fulfillment, deliveryAddress, pickupLocations, items, subtotal, descontoFidelidade, descontoCupom, cupons: cuponsUsados.map(c => ({ code: c.code, discount: Number(c.discount || 0), campaignId: c.id })), total, redemptionId: redemptionId || null, status: "recebido", createdAt: Date.now(), updatedAt: Date.now() };
         database.orders.push(order);
+        for (const coupon of cuponsUsados) coupon.used = Number(coupon.used || 0) + 1;
         if (resgateUsado) {
             resgateUsado.usedOrderId = order.id;
             const pointsEntry = database.loyaltyPoints.find(

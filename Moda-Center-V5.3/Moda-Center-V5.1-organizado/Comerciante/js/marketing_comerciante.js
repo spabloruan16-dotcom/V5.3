@@ -330,7 +330,7 @@ highlightsForm?.addEventListener("submit", event => {
 });
 // ----------(final) modificado por Marcos Salvamento do produto escolhido como destaque---------
 
-campaignForm?.addEventListener("submit", event => {
+campaignForm?.addEventListener("submit", async event => {
 	event.preventDefault();
 	const products = readProducts();
 	const name = document.getElementById("campaignName").value.trim();
@@ -354,8 +354,17 @@ campaignForm?.addEventListener("submit", event => {
         if (limit !== null && limit < 1) { campaignNote.textContent = "O limite de usos precisa ser maior que zero."; return; }
         const selectedProducts = products.filter(product => scope === "all" || (scope === "category" ? product.category === category : String(product.id) === String(productId)));
         if (!selectedProducts.length) { campaignNote.textContent = "Nenhum produto encontrado para este cupom."; return; }
-        campaigns.push({ id: `${Date.now()}`, type: "coupon", name, code, discount, scope, category, productId, productName: selectedProducts[0]?.name || "", start: startCoupon, end: endCoupon, limit, used: 0, active: true, ownerId: session.id });
+        const coupon = { id: `${Date.now()}`, type: "coupon", name, code, discount, scope, category, productId, productName: selectedProducts[0]?.name || "", start: startCoupon, end: endCoupon, limit, used: 0, active: true, ownerId: session.id };
+        campaigns.push(coupon);
         saveCampaigns(campaigns);
+        if (API_ENABLED) {
+            try {
+                const response = await fetch("/api/coupons", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(coupon) });
+                if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || "Não foi possível salvar o cupom no servidor"); }
+            } catch (error) {
+                campaigns.splice(campaigns.indexOf(coupon), 1); saveCampaigns(campaigns); campaignNote.textContent = error.message; return;
+            }
+        }
         renderCampaigns();
         closeCampaign();
         showToast("Cupom criado com sucesso.");
