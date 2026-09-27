@@ -1312,7 +1312,10 @@ function configurarCamposLive() {
  */
 function irParaEtapaLive(numero) {
     if (numero === 2 && !validarEtapaLive1()) return;
-    if (numero === 3 && !validarEtapaLive2()) return;
+    /* A etapa de produtos (2) é opcional na LIVE — ver modaCenterPrepareLiveVideoUI().
+       Por isso ir para a etapa 3 (Configurações) não pode depender de haver produto
+       selecionado, senão o comerciante fica preso pedindo para "selecionar um produto"
+       mesmo com a etapa de produtos escondida. */
 
     etapaAtualLive = numero;
     atualizarEtapaLive();
@@ -2866,6 +2869,17 @@ function modaCenterPrepareLiveVideoUI() {
     if (liveStep3Title) liveStep3Title.textContent = "Inicie a transmissão";
     const liveStep1Next = document.querySelector("#liveEtapa1 .btn-proximo-live");
     if (liveStep1Next) liveStep1Next.textContent = "Continuar para transmissão →";
+
+    /* Com a etapa de produtos escondida, a LIVE passa a ter só 2 etapas visíveis.
+       Ajusta o número exibido no botão "Configurações" (era 3) e os rótulos
+       "PASSO X DE 3" para não confundir o comerciante (antes aparecia 1 e depois
+       pulava direto para 3). */
+    const liveStep3Number = document.querySelector("#etapaLive3 .numero-etapa");
+    if (liveStep3Number) liveStep3Number.textContent = "2";
+    const liveStep1Passo = document.querySelector("#liveEtapa1 .passo-live");
+    if (liveStep1Passo) liveStep1Passo.textContent = "PASSO 1 DE 2";
+    const liveStep3Passo = document.querySelector("#liveEtapa3 .passo-live");
+    if (liveStep3Passo) liveStep3Passo.textContent = "PASSO 2 DE 2";
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", modaCenterPrepareLiveVideoUI);
