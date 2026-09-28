@@ -1,48 +1,40 @@
 {
   "products": [],
-  "stores": {
-    "test-merchant": {
-      "name": "Loja Azul",
-      "segments": [
-        "masculino"
-      ],
-      "image": null,
-      "location": {
-        "sector": "Azul",
-        "street": "F",
-        "box": "347"
-      },
-      "createdAt": 1788927412174
-    }
-  },
+  "stores": {},
   "orders": [],
   "chats": [],
-  "presence": {
-    "test-merchant": {
-      "status": "online",
-      "lastSeen": 1788927614444
-    },
-    "test-client": {
-      "status": "offline",
-      "lastSeen": 1788927304678
-    },
-    "style-client": {
-      "status": "online",
-      "lastSeen": 1788973536532
-    },
-    "aac07277-5842-4586-8141-9b1840ef01ba": {
-      "status": "online",
-      "lastSeen": 1789659563625
-    }
-  },
-  "users": [
+  "presence": {},
+  "users": [],
+  "coupons": [],
+  "loyaltyCards": [],
+  "loyaltyPoints": [],
+  "loyaltyRedemptions": [],
+  "videos": [
     {
-      "id": "aac07277-5842-4586-8141-9b1840ef01ba",
-      "name": "Renato",
-      "email": "r@e.com",
-      "password": "123456",
-      "profile": "cliente",
-      "avatar": null
+      "id": "a033db7f-f2f1-4596-81c4-5f9fa1ad7ac4",
+      "ownerId": "merchant_teste",
+      "ownerName": "Loja Teste",
+      "title": "Meu Video Teste",
+      "description": "Descricao teste",
+      "url": "/uploads/videos/a033db7f-f2f1-4596-81c4-5f9fa1ad7ac4.mp4",
+      "originalName": "video.mp4",
+      "contentType": "video/mp4",
+      "size": 1400,
+      "createdAt": 1790536854305,
+      "active": true
+    },
+    {
+      "id": "b04169e1-a985-473b-a7d6-0029c8a20fa4",
+      "ownerId": "m1",
+      "ownerName": "Loja",
+      "title": "T",
+      "description": "D",
+      "url": "/uploads/videos/b04169e1-a985-473b-a7d6-0029c8a20fa4.mp4",
+      "originalName": "v.mp4",
+      "contentType": "video/mp4",
+      "size": 200000,
+      "createdAt": 1790611829014,
+      "active": true
     }
   ]
 }

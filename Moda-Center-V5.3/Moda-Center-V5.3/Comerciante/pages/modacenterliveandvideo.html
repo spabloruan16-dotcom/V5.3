@@ -709,9 +709,25 @@
             </div>
 
 
-            <!-- DATA E HORA -->
+            <!-- COMO INICIAR -->
 
-            <div class="duas-colunas-live">
+            <div class="campo-live">
+                <label>Como você quer começar?</label>
+                <div class="modo-inicio-live" style="display:grid;gap:10px;grid-template-columns:1fr 1fr;">
+                    <label style="display:flex;gap:8px;align-items:flex-start;padding:12px;border:1px solid #ddd;border-radius:12px;cursor:pointer;">
+                        <input type="radio" name="modoInicioLive" value="agora" checked onchange="atualizarModoInicioLive()">
+                        <span><strong>🔴 Iniciar agora</strong><br><small>Abre a câmera e vai ao vivo na hora.</small></span>
+                    </label>
+                    <label style="display:flex;gap:8px;align-items:flex-start;padding:12px;border:1px solid #ddd;border-radius:12px;cursor:pointer;">
+                        <input type="radio" name="modoInicioLive" value="agendar" onchange="atualizarModoInicioLive()">
+                        <span><strong>📅 Agendar</strong><br><small>Escolha data e horário.</small></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- DATA E HORA (só aparece ao agendar) -->
+
+            <div class="duas-colunas-live" id="blocoAgendamentoLive" style="display:none;">
 
                 <div class="campo-live">
 
@@ -831,7 +847,7 @@
                     class="btn-criar-live"
                     onclick="criarLive()">
 
-                    🔴 Criar live
+                    🔴 Iniciar live agora
                 </button>
 
             </div>

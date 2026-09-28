@@ -10,7 +10,7 @@ const PUBLIC_ROOTS = [path.join(__dirname, "v3"), path.join(__dirname, "Moda-Cen
 const ROOT = PUBLIC_ROOTS.find(directory => fs.existsSync(path.join(directory, "index.html"))) || __dirname;
 const DATA_FILE = path.join(__dirname, "server", "data.json");
 const MAX_BODY_SIZE = 60 * 1024 * 1024;
-const MIME_TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska" };
+const MIME_TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime" };
 
 function readDatabase() {
     try {
@@ -140,20 +140,6 @@ function cleanLiveSignals(liveId) {
     return filtered;
 }
 
-// Remove lives cujo comerciante sumiu (fechou a aba/perdeu conexão) e espectadores inativos,
-// para que o cliente nunca veja uma live "fantasma".
-function pruneLives() {
-    const now = Date.now();
-    for (const [id, live] of activeLives) {
-        if (now - (live.lastSeen || live.createdAt) > 30000 || now - live.createdAt > 24 * 60 * 60 * 1000) {
-            activeLives.delete(id); liveSignals.delete(id); continue;
-        }
-        for (const [peerId, viewer] of live.viewers) {
-            if (now - (viewer.lastSeen || viewer.joinedAt) > 20000) live.viewers.delete(peerId);
-        }
-    }
-}
-
 function publicLive(live) {
     if (!live) return null;
     return {
@@ -249,7 +235,9 @@ async function handleApi(request, response, url) {
     // LIVES WEBRTC
     // -------------------------
     if (request.method === "GET" && url.pathname === "/api/live") {
-        pruneLives();
+        for (const [id, live] of activeLives) {
+            if (Date.now() - live.createdAt > 24 * 60 * 60 * 1000) activeLives.delete(id);
+        }
         return sendJson(response, 200, { lives: [...activeLives.values()].map(publicLive) });
     }
 
@@ -260,7 +248,7 @@ async function handleApi(request, response, url) {
         if (!ownerId || !title) return sendJson(response, 400, { error: "Comerciante e título são obrigatórios" });
         const id = crypto.randomUUID();
         const broadcasterPeerId = `broadcaster_${crypto.randomUUID()}`;
-        const live = { id, ownerId, ownerName: String(input.ownerName || "Loja Moda Center"), title, description: String(input.description || ""), cover: input.cover || null, createdAt: Date.now(), lastSeen: Date.now(), broadcasterPeerId, viewers: new Map() };
+        const live = { id, ownerId, ownerName: String(input.ownerName || "Loja Moda Center"), title, description: String(input.description || ""), cover: input.cover || null, createdAt: Date.now(), broadcasterPeerId, viewers: new Map() };
         activeLives.set(id, live);
         liveSignals.set(id, []);
         return sendJson(response, 201, { live: publicLive(live), broadcasterPeerId });
@@ -268,12 +256,11 @@ async function handleApi(request, response, url) {
 
     const liveJoinMatch = url.pathname.match(/^\/api\/live\/([^/]+)\/join$/);
     if (request.method === "POST" && liveJoinMatch) {
-        pruneLives();
         const id = decodeURIComponent(liveJoinMatch[1]);
         const live = activeLives.get(id);
         if (!live) return sendJson(response, 404, { error: "Essa live não está mais disponível" });
         const peerId = `viewer_${crypto.randomUUID()}`;
-        live.viewers.set(peerId, { joinedAt: Date.now(), lastSeen: Date.now() });
+        live.viewers.set(peerId, { joinedAt: Date.now() });
         return sendJson(response, 200, { peerId, broadcasterPeerId: live.broadcasterPeerId, live: publicLive(live) });
     }
 
@@ -294,14 +281,11 @@ async function handleApi(request, response, url) {
 
     const liveSignalsMatch = url.pathname.match(/^\/api\/live\/([^/]+)\/signals$/);
     if (request.method === "GET" && liveSignalsMatch) {
-        pruneLives();
         const id = decodeURIComponent(liveSignalsMatch[1]);
         const live = activeLives.get(id);
         if (!live) return sendJson(response, 404, { error: "Live encerrada" });
         const peerId = String(url.searchParams.get("peerId") || "");
         if (!peerId || (peerId !== live.broadcasterPeerId && !live.viewers.has(peerId))) return sendJson(response, 403, { error: "Participante inválido" });
-        if (peerId === live.broadcasterPeerId) live.lastSeen = Date.now();
-        else live.viewers.get(peerId).lastSeen = Date.now();
         const signals = cleanLiveSignals(id);
         const mine = signals.filter(signal => signal.to === peerId);
         const remaining = signals.filter(signal => signal.to !== peerId);
@@ -1114,25 +1098,14 @@ if (request.method === "POST" && url.pathname === "/api/loyalty-redeem") {
     sendJson(response, 404, { error: "Rota nao encontrada" });
 }
 
-function serveStatic(response, urlPath, request) {
+function serveStatic(response, urlPath) {
     const requested = urlPath === "/" ? "/index.html" : urlPath;
     const filePath = path.resolve(ROOT, `.${requested}`);
     if (!filePath.startsWith(`${ROOT}${path.sep}`)) return sendJson(response, 403, { error: "Acesso negado" });
-    const type = MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
-    fs.stat(filePath, (statError, stats) => {
-        if (statError || !stats.isFile()) return sendJson(response, statError && statError.code !== "ENOENT" ? 500 : 404, { error: "Arquivo nao encontrado" });
-        // Vídeos precisam de suporte a Range (Safari/iOS e busca na linha do tempo).
-        const range = request && request.headers.range;
-        const match = range && /^bytes=(\d*)-(\d*)$/.exec(range);
-        if (match && stats.size > 0) {
-            let start = match[1] === "" ? Math.max(0, stats.size - Number(match[2])) : Number(match[1]);
-            let end = match[1] === "" || match[2] === "" ? stats.size - 1 : Math.min(Number(match[2]), stats.size - 1);
-            if (start > end || start >= stats.size) { response.writeHead(416, { "Content-Range": `bytes */${stats.size}` }); return response.end(); }
-            response.writeHead(206, { "Content-Type": type, "Content-Range": `bytes ${start}-${end}/${stats.size}`, "Accept-Ranges": "bytes", "Content-Length": end - start + 1, "Cache-Control": "no-cache" });
-            return fs.createReadStream(filePath, { start, end }).pipe(response);
-        }
-        response.writeHead(200, { "Content-Type": type, "Content-Length": stats.size, "Accept-Ranges": "bytes", "Cache-Control": "no-cache" });
-        fs.createReadStream(filePath).pipe(response);
+    fs.readFile(filePath, (error, content) => {
+        if (error) return sendJson(response, error.code === "ENOENT" ? 404 : 500, { error: "Arquivo nao encontrado" });
+        response.writeHead(200, { "Content-Type": MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream", "Cache-Control": "no-cache" });
+        response.end(content);
     });
 }
 
@@ -1140,11 +1113,11 @@ const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
     try {
         if (url.pathname.startsWith("/api/")) await handleApi(request, response, url);
-        else serveStatic(response, url.pathname, request);
+        else serveStatic(response, url.pathname);
     } catch (error) {
         console.error(error);
         sendJson(response, 500, { error: "Erro interno" });
     }
 });
 
-server.listen(PORT, "0.0.0.0", () => console.log(`Moda Center em http://localhost:${PORT}`));
+server.listen("/tmp/moda.sock", () => console.log("listening on unix socket"));

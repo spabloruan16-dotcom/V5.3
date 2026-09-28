@@ -123,7 +123,7 @@ function renderVideos(videos) {
         <button type="button" class="lv-card" data-video-id="${escapeHtml(video.id)}">
             <div class="lv-card-thumb">
                 <span class="lv-card-badge lv-badge-video">🎬 VÍDEO</span>
-                ${video.capa ? `<img src="${escapeHtml(video.capa)}" alt="Capa do vídeo">` : `<span class="lv-card-play">▶</span>`}
+                ${video.capa ? `<img src="${escapeHtml(video.capa)}" alt="Capa do vídeo">` : `<video src="${escapeHtml(video.url || video.videoUrl || "")}#t=0.5" preload="metadata" muted playsinline></video><span class="lv-card-play">▶</span>`}
             </div>
             <div class="lv-card-body">
                 <strong>${escapeHtml(video.title || video.titulo)}</strong>
@@ -176,6 +176,8 @@ const liveWatchStatus = document.getElementById("liveWatchStatus");
 let viewerState = null;
 let viewerPc = null;
 let viewerPollTimer = null;
+let viewerPolling = false;
+let viewerPendingIce = [];
 
 function mostrarStatusLive(mensagem) {
     if (!mensagem) { liveWatchStatus.hidden = true; return; }
@@ -202,13 +204,17 @@ async function assistirLive(live) {
 }
 
 async function pollSignals() {
-    if (!viewerState) return;
+    /* Evita polls sobrepostos: senão um candidato ICE podia ser processado antes da oferta. */
+    if (!viewerState || viewerPolling) return;
+    viewerPolling = true;
     try {
         const data = await api(`/api/live/${encodeURIComponent(viewerState.liveId)}/signals?peerId=${encodeURIComponent(viewerState.peerId)}`);
         for (const signal of (data.signals || [])) await handleSignal(signal);
     } catch (error) {
         mostrarStatusLive("A transmissão foi encerrada.");
         pararAssistirLive(false);
+    } finally {
+        viewerPolling = false;
     }
 }
 
@@ -220,7 +226,8 @@ async function handleSignal(signal) {
         viewerPc.ontrack = event => {
             liveWatchVideo.srcObject = event.streams[0];
             mostrarStatusLive(null);
-            liveWatchVideo.play().catch(() => {});
+            /* Navegadores podem bloquear áudio automático: tenta com som e, se bloquear, entra mudo. */
+            liveWatchVideo.play().catch(() => { liveWatchVideo.muted = true; liveWatchVideo.play().catch(() => {}); mostrarStatusLive(null); });
         };
         viewerPc.onicecandidate = event => { if (event.candidate) enviarSinal("ice", event.candidate); };
         viewerPc.onconnectionstatechange = () => {
@@ -230,13 +237,16 @@ async function handleSignal(signal) {
         };
         try {
             await viewerPc.setRemoteDescription(new RTCSessionDescription(signal.data));
+            for (const candidate of viewerPendingIce) { try { await viewerPc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (_) {} }
+            viewerPendingIce = [];
             const answer = await viewerPc.createAnswer();
             await viewerPc.setLocalDescription(answer);
             await enviarSinal("answer", answer);
         } catch (_) { mostrarStatusLive("Não foi possível conectar à transmissão."); }
     }
 
-    if (signal.type === "ice" && signal.data && viewerPc) {
+    if (signal.type === "ice" && signal.data) {
+        if (!viewerPc || !viewerPc.remoteDescription) { viewerPendingIce.push(signal.data); return; }
         try { await viewerPc.addIceCandidate(new RTCIceCandidate(signal.data)); } catch (_) { /* ignora candidato inválido */ }
     }
 }
@@ -256,6 +266,8 @@ function pararAssistirLive(avisarServidor = true) {
     clearInterval(viewerPollTimer);
     viewerPollTimer = null;
     if (viewerPc) { viewerPc.close(); viewerPc = null; }
+    viewerPendingIce = [];
+    liveWatchVideo.muted = false;
     liveWatchVideo.srcObject = null;
     if (viewerState && avisarServidor) {
         api(`/api/live/${encodeURIComponent(viewerState.liveId)}/leave`, {
@@ -272,9 +284,15 @@ document.getElementById("closeLiveWatch").addEventListener("click", () => {
     liveWatchModal.hidden = true;
 });
 
+window.addEventListener("pagehide", () => {
+    if (!viewerState) return;
+    try { navigator.sendBeacon(`/api/live/${encodeURIComponent(viewerState.liveId)}/leave`, new Blob([JSON.stringify({ peerId: viewerState.peerId })], { type: "application/json" })); } catch (_) {}
+});
+
 /* ----------------------------------------------------------------
    INICIALIZAÇÃO
 ---------------------------------------------------------------- */
 carregarLives();
 carregarVideos();
 if (API_ENABLED) window.setInterval(() => { if (!liveWatchModal.hidden) return; carregarLives(); }, 6000);
+if (API_ENABLED) window.setInterval(() => { if (!videoWatchModal.hidden) return; carregarVideos(); }, 15000);

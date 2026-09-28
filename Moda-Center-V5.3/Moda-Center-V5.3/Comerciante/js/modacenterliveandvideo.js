@@ -2767,7 +2767,7 @@ async function modaCenterPollLiveSignals() {
 async function modaCenterStartLive(live, broadcasterPeerId) {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error("Seu navegador não permite acesso à câmera e ao microfone.");
     modaCenterEnsureLivePanel();
-    modaCenterLiveStream = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:1280}, height:{ideal:720}, facingMode:"user" }, audio:true });
+    modaCenterLiveStream = modaCenterLiveStream || await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:1280}, height:{ideal:720}, facingMode:"user" }, audio:true });
     const preview = document.getElementById("mcLivePreview");
     if (preview) { preview.srcObject = modaCenterLiveStream; await preview.play().catch(()=>{}); }
     document.getElementById("mcLiveTitle").textContent = live.title;
@@ -2794,7 +2794,7 @@ async function modaCenterStopLive(showMessage=true) {
     if (showMessage) alert("A live foi encerrada e deixou de aparecer para os clientes.");
 }
 
-async function criarLive() {
+async function modaCenterCriarLiveReal() {
     const titulo = document.getElementById("tituloLive")?.value.trim() || "";
     const descricao = document.getElementById("descricaoLive")?.value.trim() || "";
     if (!titulo) return alert("Digite um título para a live.");
@@ -2810,11 +2810,11 @@ async function criarLive() {
     } catch (error) {
         alert(error.message || "Não foi possível iniciar a live.");
     } finally {
-        if (botao) { botao.disabled = false; botao.textContent = "🔴 Criar live"; }
+        if (botao) { botao.disabled = false; botao.textContent = "🔴 Iniciar live agora"; }
     }
 }
 
-async function publicarVideo() {
+async function modaCenterPublicarVideoReal() {
     const arquivo = document.getElementById("arquivoVideo")?.files?.[0];
     const titulo = document.getElementById("tituloVideo")?.value.trim() || "";
     const descricao = document.getElementById("descricaoVideo")?.value.trim() || "";
@@ -2833,7 +2833,8 @@ async function publicarVideo() {
         localVideos.push({ id:response.video.id, merchantId:modaCenterOwnerId(), titulo, descricao, visibilidade:"Público", videoUrl:response.video.url, capa:capa && !capa.startsWith("blob:") ? capa : null, produto:null, criadoEm:new Date().toISOString(), status:"publicado" });
         saveItemsToStorage(VIDEOS_KEY, localVideos);
         alert("🎬 Vídeo publicado! Agora ele aparece para os clientes na aba Live e Vídeos.");
-        try { abrirMeusVideos(); } catch (_) {}
+        try { window.resetarFormularioVideo_Simples(); } catch (_) {}
+        try { abrirMeusVideos(); } catch (_) { try { window.voltarSelecao(); } catch (__) {} }
     } catch (error) {
         alert(error.message || "Não foi possível publicar o vídeo.");
     } finally {
@@ -2884,3 +2885,94 @@ function modaCenterPrepareLiveVideoUI() {
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", modaCenterPrepareLiveVideoUI);
 else modaCenterPrepareLiveVideoUI();
+
+
+/* ================================================================
+   FLUXO FINAL — estas atribuições ficam por ÚLTIMO de propósito.
+   Antes, window.publicarVideo / window.criarLive (versões "simples",
+   que só gravavam no localStorage do comerciante) sobrescreviam as
+   versões reais e nada chegava ao servidor nem ao cliente.
+================================================================ */
+const modaCenterCriarLiveAgendada = window.criarLive; /* versão simples: salva agendamento */
+
+function modaCenterModoLive() {
+    return document.querySelector('input[name="modoInicioLive"]:checked')?.value || "agora";
+}
+
+function atualizarModoInicioLive() {
+    const agendar = modaCenterModoLive() === "agendar";
+    const bloco = document.getElementById("blocoAgendamentoLive");
+    if (bloco) bloco.style.display = agendar ? "" : "none";
+    const botao = document.querySelector(".btn-criar-live");
+    if (botao) botao.textContent = agendar ? "📅 Agendar live" : "🔴 Iniciar live agora";
+}
+window.atualizarModoInicioLive = atualizarModoInicioLive;
+
+/* Converte a capa escolhida (se houver) em uma miniatura JPEG pequena para enviar ao servidor. */
+function modaCenterCapaLiveDataUrl() {
+    return new Promise(resolve => {
+        const file = document.getElementById("capaLive")?.files?.[0];
+        if (!file) return resolve(null);
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const scale = Math.min(1, 640 / Math.max(img.width, img.height));
+                const canvas = document.createElement("canvas");
+                canvas.width = Math.round(img.width * scale); canvas.height = Math.round(img.height * scale);
+                canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+                resolve(canvas.toDataURL("image/jpeg", 0.75));
+            } catch (_) { resolve(null); }
+            URL.revokeObjectURL(url);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
+    });
+}
+
+/* Iniciar na hora (estilo TikTok/YouTube): abre a câmera, cria a live no servidor
+   e ela já aparece para os clientes na aba Live/Vídeos. */
+async function modaCenterIniciarLiveAgora() {
+    const titulo = document.getElementById("tituloLive")?.value.trim() || "";
+    const descricao = document.getElementById("descricaoLive")?.value.trim() || "";
+    if (!titulo) return alert("Digite um título para a live.");
+    if (!descricao) return alert("Digite uma descrição para a live.");
+    if (!navigator.mediaDevices?.getUserMedia) return alert("Seu navegador não permite acesso à câmera e ao microfone.");
+    if (!window.isSecureContext && location.hostname !== "localhost") return alert("Para usar câmera e microfone, abra o site em HTTPS.");
+    if (modaCenterLiveState) return alert("Você já está transmitindo uma live.");
+    const botao = document.querySelector(".btn-criar-live");
+    if (botao) { botao.disabled = true; botao.textContent = "🔴 Abrindo câmera..."; }
+    try {
+        /* 1º a câmera (o comerciante pode demorar no pedido de permissão),
+           depois a live é criada já com o vídeo pronto. */
+        modaCenterLiveStream = await navigator.mediaDevices.getUserMedia({ video: { width:{ideal:1280}, height:{ideal:720}, facingMode:"user" }, audio:true });
+        const capa = await modaCenterCapaLiveDataUrl();
+        const data = await modaCenterApi("/api/live", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ ownerId:modaCenterOwnerId(), ownerName:modaCenterOwnerName(), title:titulo, description:descricao, cover:capa }) });
+        await modaCenterStartLive(data.live, data.broadcasterPeerId);
+        try { window.resetarFormularioLive_Simples(); } catch (_) {}
+    } catch (error) {
+        modaCenterLiveStream?.getTracks().forEach(track => track.stop());
+        modaCenterLiveStream = null;
+        const denied = error && (error.name === "NotAllowedError" || error.name === "NotFoundError");
+        alert(denied ? "Não foi possível acessar a câmera/microfone. Permita o acesso no navegador e tente de novo." : (error.message || "Não foi possível iniciar a live."));
+    } finally {
+        if (botao) { botao.disabled = false; atualizarModoInicioLive(); }
+    }
+}
+
+window.criarLive = function () {
+    if (modaCenterModoLive() === "agendar") return modaCenterCriarLiveAgendada();
+    return modaCenterIniciarLiveAgora();
+};
+window.publicarVideo = modaCenterPublicarVideoReal;
+
+/* Se o comerciante fechar a aba, encerra a live no servidor. */
+window.addEventListener("pagehide", () => {
+    if (!modaCenterLiveState) return;
+    try {
+        navigator.sendBeacon(`/api/live/${encodeURIComponent(modaCenterLiveState.live.id)}/leave`, new Blob([JSON.stringify({ peerId: modaCenterLiveState.peerId })], { type: "application/json" }));
+    } catch (_) {}
+});
+
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", atualizarModoInicioLive);
+else atualizarModoInicioLive();
